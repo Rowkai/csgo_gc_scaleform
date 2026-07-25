@@ -5,6 +5,8 @@
 #include "keyvalue.h"
 #include "steam/isteamuser.h" // MicroTxnAuthorizationResponse_t 
 #include "econ_gcmessages.pb.h"
+#include "gcsdk_gcmessages.pb.h"
+
 
 const char *MessageName(uint32_t type);
 
