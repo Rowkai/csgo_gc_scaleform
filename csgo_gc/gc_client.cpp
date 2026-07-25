@@ -411,6 +411,7 @@ void ClientGC::UseItemRequest(GCMessageRead &messageRead)
         SendMessageToGame(true, k_ESOMsg_UpdateMultiple, updateMultiple);
 
         SendMessageToGame(false, k_EMsgGCItemCustomizationNotification, notification);
+        
     }
 }
 
@@ -807,9 +808,12 @@ void ClientGC::UnlockCrate(GCMessageRead &messageRead)
         {
             CMsgGCUnlockCrateResponse response;
             response.set_result(0);                     // 0 = success
-            // Optionally, include the new item ID if the proto supports it:
-            response.set_item_id(newItem.id());
             m_outgoingMessages.emplace(k_EMsgGCUnlockCrateResponse, response, requestJobId);
+            // Send ShowItemsPickedUp to finalize the case opening
+            CMsgGCShowItemsPickedUp showMsg;
+            showMsg.add_item_ids(newItem.id());  // or use the item's ID
+            showMsg.set_def_index(0);            // optional, not strictly needed
+            SendMessageToGame(false, k_EMsgGCShowItemsPickedUp, showMsg);
         }
 
         // Destroy consumed items
