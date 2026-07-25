@@ -3,7 +3,7 @@
 #include "gc_server.h"
 #include "graffiti.h"
 #include "keyvalue.h"
-#include "steam/isteamuser.h" // MicroTxnAuthorizationResponse_t
+#include "steam/isteamuser.h" // MicroTxnAuthorizationResponse_t 
 #include "econ_gcmessages.pb.h"
 
 const char *MessageName(uint32_t type);
