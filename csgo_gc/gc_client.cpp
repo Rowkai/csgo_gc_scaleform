@@ -805,9 +805,11 @@ void ClientGC::UnlockCrate(GCMessageRead &messageRead)
         // Body layout matches MsgGCStandardResponse_t: int16 index + uint32 response.
         // When request had a struct body, route the response using incoming job ID.
         {
-            GCMessageWrite &responseMsg = m_outgoingMessages.emplace(k_EMsgGCUnlockCrateResponse, requestJobId);
-            responseMsg.WriteUint16(0);
-            responseMsg.WriteUint32(0);
+            CMsgGCUnlockCrateResponse response;
+            response.set_result(0);                     // 0 = success
+            // Optionally, include the new item ID if the proto supports it:
+            response.set_item_id(newItem.id());
+            m_outgoingMessages.emplace(k_EMsgGCUnlockCrateResponse, response, requestJobId);
         }
 
         // Destroy consumed items
