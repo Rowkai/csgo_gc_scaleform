@@ -4,6 +4,7 @@
 #include "graffiti.h"
 #include "keyvalue.h"
 #include "steam/isteamuser.h" // MicroTxnAuthorizationResponse_t
+#include "econ_gcmessages.pb.h"
 
 const char *MessageName(uint32_t type);
 
@@ -811,8 +812,6 @@ void ClientGC::UnlockCrate(GCMessageRead &messageRead)
             m_outgoingMessages.emplace(k_EMsgGCUnlockCrateResponse, response, requestJobId);
             // Send ShowItemsPickedUp to finalize the case opening
             CMsgGCShowItemsPickedUp showMsg;
-            showMsg.add_item_ids(newItem.id());  // or use the item's ID
-            showMsg.set_def_index(0);            // optional, not strictly needed
             SendMessageToGame(false, k_EMsgGCShowItemsPickedUp, showMsg);
         }
 
