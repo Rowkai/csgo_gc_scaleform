@@ -11,6 +11,14 @@ message CMsgGCGiftedItems {
     repeated uint32 recipients_accountids = 5;
 }
 
+message CMsgGCUnlockCrateResponse {
+    optional int32 result = 0;   // 0 = success
+}
+
+message CMsgGCShowItemsPickedUp {
+    // No fields needed – acts as a notification
+}
+
 message CMsgCasketItem {
     optional uint64 casket_item_id = 1;
     optional uint64 item_item_id = 2;
