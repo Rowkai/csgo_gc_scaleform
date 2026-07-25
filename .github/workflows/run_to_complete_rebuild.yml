@@ -1,0 +1,48 @@
+name: Fix Proto and Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Add missing protobuf messages if needed
+        shell: bash
+        run: |
+          PROTO_FILE="csgo_gc/econ_gcmessages.proto"
+          # Check if the file already contains the definitions
+          if ! grep -q "message CMsgGCUnlockCrateResponse" "$PROTO_FILE"; then
+            echo "Appending missing message definitions..."
+            cat << 'EOF' >> "$PROTO_FILE"
+
+          message CMsgGCUnlockCrateResponse {
+              optional int32 result = 1;   # 0 = success
+          }
+
+          message CMsgGCShowItemsPickedUp {
+              # No fields required
+          }
+          EOF
+          else
+            echo "Definitions already present."
+          fi
+
+      - name: Force protobuf regeneration
+        shell: bash
+        run: |
+          # Touch the proto file to update its timestamp
+          touch csgo_gc/econ_gcmessages.proto
+          # Remove the build directory to force a clean rebuild
+          rm -rf build/
+
+      - name: Create release directory
+        run: mkdir release
+
+      - name: Configure CMake
+        run: |
+          cmake -A Win32 -B build -DCMAKE_BUILD_TYPE=Release -S . -DOUTDIR=release
