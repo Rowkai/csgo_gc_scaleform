@@ -812,9 +812,6 @@ void ClientGC::UnlockCrate(GCMessageRead &messageRead)
             CMsgGCUnlockCrateResponse response;
             response.set_result(0);                     // 0 = success
             m_outgoingMessages.emplace(k_EMsgGCUnlockCrateResponse, response, requestJobId);
-            // Send ShowItemsPickedUp to finalize the case opening
-            CMsgGCShowItemsPickedUp showMsg;
-            SendMessageToGame(false, k_EMsgGCShowItemsPickedUp, showMsg);
         }
 
         // Destroy consumed items
