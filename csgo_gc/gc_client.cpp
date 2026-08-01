@@ -3,7 +3,10 @@
 #include "gc_server.h"
 #include "graffiti.h"
 #include "keyvalue.h"
-#include "steam/isteamuser.h" // MicroTxnAuthorizationResponse_t
+#include "steam/isteamuser.h" // MicroTxnAuthorizationResponse_t 
+#include "econ_gcmessages.pb.h"
+#include "gcsdk_gcmessages.pb.h"
+
 
 const char *MessageName(uint32_t type);
 
@@ -411,6 +414,7 @@ void ClientGC::UseItemRequest(GCMessageRead &messageRead)
         SendMessageToGame(true, k_ESOMsg_UpdateMultiple, updateMultiple);
 
         SendMessageToGame(false, k_EMsgGCItemCustomizationNotification, notification);
+        
     }
 }
 
@@ -805,11 +809,9 @@ void ClientGC::UnlockCrate(GCMessageRead &messageRead)
         // Body layout matches MsgGCStandardResponse_t: int16 index + uint32 response.
         // When request had a struct body, route the response using incoming job ID.
         {
-            GCMessageWrite &responseMsg = parsedFromBody
-                ? m_outgoingMessages.emplace(k_EMsgGCUnlockCrateResponse, requestJobId)
-                : m_outgoingMessages.emplace(k_EMsgGCUnlockCrateResponse);
-            responseMsg.WriteUint16(0);  // m_nResponseIndex = 0
-            responseMsg.WriteUint32(0);  // m_eResponse = k_EGCMsgResponseOK = 0
+            CMsgGCUnlockCrateResponse response;
+            response.set_result(0);                     // 0 = success
+            m_outgoingMessages.emplace(k_EMsgGCUnlockCrateResponse, response, requestJobId);
         }
 
         // Destroy consumed items
