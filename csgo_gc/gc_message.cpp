@@ -134,17 +134,6 @@ GCMessageWrite::GCMessageWrite(uint32_t type)
     WriteUint16(0);
 }
 
-GCMessageWrite::GCMessageWrite(uint32_t type, uint64_t jobIdTarget)
-{
-    // GCMsgHdrEx_t (34 bytes)
-    WriteUint32(type); // m_eMsg
-    WriteUint32(0); // m_nSrcGCDirIndex
-    WriteUint64(0); // m_ulSteamID
-    WriteUint16(1); // m_nHdrVersion
-    WriteUint64(jobIdTarget); // m_JobIDTarget
-    WriteUint64(JobIdInvalid); // m_JobIDSource
-}
-
 GCMessageWrite::GCMessageWrite(const void *data, uint32_t size)
 {
     assert(size >= sizeof(uint32_t));

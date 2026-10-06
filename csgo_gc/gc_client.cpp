@@ -727,15 +727,6 @@ void ClientGC::DeleteItem(GCMessageRead &messageRead)
 
 void ClientGC::UnlockCrate(GCMessageRead &messageRead)
 {
-    // some older builds send this with the extended GCMsgHdrEx_t header, in which
-    // case the job ids come before the body and the response has to target the job
-    uint64_t requestJobId = JobIdInvalid;
-    if (messageRead.RemainingSize() >= sizeof(uint64_t) * 4)
-    {
-        messageRead.ReadUint64(); // m_JobIDTarget
-        requestJobId = messageRead.ReadUint64(); // m_JobIDSource
-    }
-
     uint64_t keyId = messageRead.ReadUint64();
     uint64_t crateId = messageRead.ReadUint64();
     if (!messageRead.IsValid())
@@ -761,11 +752,19 @@ void ClientGC::UnlockCrate(GCMessageRead &messageRead)
     notification.Swap(&messages.notification);
     SendInventoryChangeMessages(messages);
 
-    // body is MsgGCStandardResponse_t: response index and k_EGCMsgResponseOK
-    GCMessageWrite response{ k_EMsgGCUnlockCrateResponse, requestJobId };
-    response.WriteUint16(0);
-    response.WriteUint32(0);
-    PostToHost(HostEvent::Message, response.TypeMasked(), response.Data(), response.Size());
+    // struct messages reach the game without the eMsg/steamid part of GCMsgHdrEx_t, the
+    // client fills that in itself. what's left is the header version and the job ids (none,
+    // CGCUnlockCrateResponse handles it by message type) followed by MsgGCStandardResponse_t
+    MessageWrite response;
+    response.WriteUint16(1); // m_nHdrVersion
+    response.WriteUint64(JobIdInvalid); // m_JobIDTarget
+    response.WriteUint64(JobIdInvalid); // m_JobIDSource
+    response.WriteUint16(0); // m_nResponseIndex
+    response.WriteUint32(0); // m_eResponse, k_EGCMsgResponseOK
+    PostToHost(HostEvent::Message, k_EMsgGCUnlockCrateResponse, response.Data(), response.Size());
+
+    Platform::Print("Unboxed item {}, sent k_EMsgGCUnlockCrateResponse\n",
+        notification.item_id_size() ? notification.item_id(0) : 0);
 
     SendMessageToGame(false, k_EMsgGCItemCustomizationNotification, notification);
 }
