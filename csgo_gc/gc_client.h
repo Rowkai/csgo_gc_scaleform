@@ -22,6 +22,7 @@ private:
     void HandleNetMessage(const void *data, uint32_t size);
     void HandleSOCacheRequest();
     void InventoryUpdate();
+    void HandleMarketLink(std::string_view url);
 
     // send to the local game and the game server we're connected to (if we're connected)
     void SendMessageToGame(bool sendToGameServer, uint32_t type,

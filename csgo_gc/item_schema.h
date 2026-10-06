@@ -39,6 +39,9 @@ public:
     bool m_isCoupon;
     std::string m_lootListName;
     bool m_willProduceStatTrak;
+
+    // tags/ItemSet/tag_value, cases have this
+    std::string m_itemSetTag;
 };
 
 class PaintKitInfo

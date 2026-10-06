@@ -576,7 +576,33 @@ public:
     }
 };
 
+// panorama shows the cases on the store banner as market links, clicking one opens a
+// steam market search for the case's item set in the overlay. hand that to the gc
+// instead so it can give the case, otherwise there's no way to get them from the store
+class SteamFriendsProxy final
+{
+public:
+    void ActivateGameOverlayToWebPage(auto original, const char *pchURL)
+    {
+        if (s_clientGC && pchURL && IsStoreMarketLink(pchURL))
+        {
+            s_clientGC->m_gc.PostToGC(GCEvent::MarketLink, 0, pchURL, static_cast<uint32_t>(strlen(pchURL)));
+            return;
+        }
+
+        original(pchURL);
+    }
+
+private:
+    static bool IsStoreMarketLink(std::string_view url)
+    {
+        return url.find("/market/search?") != std::string_view::npos
+            && url.find("_ItemSet%5B%5D=tag_") != std::string_view::npos;
+    }
+};
+
 // now generate the proxy glue...
+#include <proxy/steamfriendsproxy015.h>
 #include <proxy/steamgamecoordinatorproxy001.h>
 #include <proxy/steamgameserverproxy010.h>
 #include <proxy/steamgameserverproxy011.h>
@@ -669,6 +695,13 @@ public:
             return nullptr;
         }
 
+        if (VersionNameIs(version, "SteamFriends"))
+        {
+            // only needed for the store market links on old panorama builds, so no other versions
+            PROXY_INTERFACE(SteamFriends, 015);
+            return nullptr;
+        }
+
         if (VersionNameIs(version, "SteamGameServer"))
         {
             PROXY_INTERFACE(SteamGameServer, 010);
@@ -747,6 +780,7 @@ private:
     std::unordered_map<std::string, InterfaceProxy> m_interfaces;
 
     // version agnostic proxy data
+    std::unique_ptr<SteamFriendsProxy> m_proxySteamFriends;
     std::unique_ptr<SteamGameCoordinatorProxy> m_proxySteamGameCoordinator;
     std::unique_ptr<SteamUtilsProxy> m_proxySteamUtils;
     std::unique_ptr<SteamUserStatsProxy> m_proxySteamUserStats;
@@ -825,6 +859,11 @@ public:
     }
 
     ISteamGameServer *GetISteamGameServer(auto original, HSteamUser hSteamUser, HSteamPipe hSteamPipe, const char *pchVersion)
+    {
+        return ProxyInterface(original(hSteamUser, hSteamPipe, pchVersion), hSteamUser, hSteamPipe, pchVersion);
+    }
+
+    ISteamFriends *GetISteamFriends(auto original, HSteamUser hSteamUser, HSteamPipe hSteamPipe, const char *pchVersion)
     {
         return ProxyInterface(original(hSteamUser, hSteamPipe, pchVersion), hSteamUser, hSteamPipe, pchVersion);
     }

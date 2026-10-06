@@ -543,6 +543,17 @@ void ItemSchema::ParseItemRecursive(ItemInfo &info, const KeyValue &itemKey, con
         info.m_lootListName = lootListName;
     }
 
+    const KeyValue *tagsKey = itemKey.GetSubkey("tags");
+    const KeyValue *itemSetKey = tagsKey ? tagsKey->GetSubkey("ItemSet") : nullptr;
+    if (itemSetKey)
+    {
+        std::string_view itemSetTag = itemSetKey->GetString("tag_value");
+        if (itemSetTag.size())
+        {
+            info.m_itemSetTag = itemSetTag;
+        }
+    }
+
     info.m_willProduceStatTrak = itemKey.GetNumber("will_produce_stattrak", false);
 
     const KeyValue *attributes = itemKey.GetSubkey("attributes");

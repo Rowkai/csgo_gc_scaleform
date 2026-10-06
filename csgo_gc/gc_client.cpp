@@ -47,6 +47,10 @@ void ClientGC::HandleEvent(GCEvent type, uint64_t id, const std::vector<uint8_t>
         InventoryUpdate();
         break;
 
+    case GCEvent::MarketLink:
+        HandleMarketLink({ reinterpret_cast<const char *>(buffer.data()), buffer.size() });
+        break;
+
     default:
         assert(false);
         break;
@@ -531,6 +535,66 @@ void ClientGC::ApplySticker(GCMessageRead &messageRead)
     SendInventoryChangeMessages(messages);
 }
 
+static bool LoadPriceSheet(KeyValue &priceSheet)
+{
+    return priceSheet.ParseFromFile("csgo_gc/price_sheet.txt")
+        || priceSheet.ParseFromFile("examples/price_sheet.txt");
+}
+
+// panorama's store tab shows cases as market links, steam_hook catches the market search
+// url (filtered by the case's item set) and sends it here, give the case instead
+void ClientGC::HandleMarketLink(std::string_view url)
+{
+    constexpr std::string_view ItemSetParam = "_ItemSet%5B%5D=tag_";
+
+    size_t start = url.find(ItemSetParam);
+    if (start == std::string_view::npos)
+    {
+        return;
+    }
+
+    start += ItemSetParam.size();
+    std::string_view itemSet = url.substr(start, url.find('&', start) - start);
+
+    KeyValue priceSheet{ "price_sheet" };
+    if (!LoadPriceSheet(priceSheet))
+    {
+        return;
+    }
+
+    const KeyValue *store = priceSheet.GetSubkey("store");
+    const KeyValue *banner = store ? store->GetSubkey("store_banner_layout") : nullptr;
+    if (!banner)
+    {
+        return;
+    }
+
+    for (const KeyValue &bannerItem : *banner)
+    {
+        std::string_view marketLink = bannerItem.GetString("market_link");
+        if (!marketLink.size() || marketLink == "0")
+        {
+            continue;
+        }
+
+        uint32_t defIndex = FromString<uint32_t>(bannerItem.Name());
+        const ItemInfo *itemInfo = m_inventory.ItemInfoByDefIndex(ToEnum<ItemDefIndex>(defIndex));
+        if (!itemInfo || itemInfo->m_itemSetTag != itemSet)
+        {
+            continue;
+        }
+
+        Platform::Print("Giving {} for the store market link\n", itemInfo->m_name);
+
+        std::vector<uint64_t> itemIds;
+        InventoryChangeMessages messages = m_inventory.PurchaseItems({ defIndex }, itemIds);
+        SendInventoryChangeMessages(messages);
+        return;
+    }
+
+    Platform::Print("No store market item with item set {}\n", itemSet);
+}
+
 // 2018 builds ship both uis (picked with -scaleform/-panorama) and load client_panorama for panorama.
 // builds after scaleform was removed don't have scaleformui at all (-legacyscaleformui uses scaleformui_3)
 static bool IsScaleformUI()
@@ -666,8 +730,7 @@ void ClientGC::StoreGetUserData(GCMessageRead &messageRead)
     }
 
     KeyValue priceSheet{ "price_sheet" };
-    if (!priceSheet.ParseFromFile("csgo_gc/price_sheet.txt")
-        && !priceSheet.ParseFromFile("examples/price_sheet.txt"))
+    if (!LoadPriceSheet(priceSheet))
     {
         return;
     }

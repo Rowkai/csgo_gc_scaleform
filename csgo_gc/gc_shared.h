@@ -16,6 +16,7 @@ enum class GCEvent
     SOCacheRequest, // sent to client gc when connected to a gameserver
     ClientSOCacheUnsubscribe, // sent to server gc when a client disconnects, id contains the steam id
     Tick, // client gc... sent when running callbacks
+    MarketLink, // client gc, buffer contains a steam market url the store tried to open
 };
 
 struct EventData
