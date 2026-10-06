@@ -753,14 +753,21 @@ void ClientGC::UnlockCrate(GCMessageRead &messageRead)
         return;
     }
 
-    // older builds wait for this before showing the unboxed item
+    // older (scaleform) builds start the unboxing reveal from the response handler, which
+    // looks up the newest unacknowledged "found in crate" item in the local inventory. so the
+    // item has to be created before the response arrives, otherwise the reveal never starts
+    // and the ui gives up with "we are unable to retrieve your item"
+    CMsgGCItemCustomizationNotification notification;
+    notification.Swap(&messages.notification);
+    SendInventoryChangeMessages(messages);
+
     // body is MsgGCStandardResponse_t: response index and k_EGCMsgResponseOK
     GCMessageWrite response{ k_EMsgGCUnlockCrateResponse, requestJobId };
     response.WriteUint16(0);
     response.WriteUint32(0);
     PostToHost(HostEvent::Message, response.TypeMasked(), response.Data(), response.Size());
 
-    SendInventoryChangeMessages(messages);
+    SendMessageToGame(false, k_EMsgGCItemCustomizationNotification, notification);
 }
 
 void ClientGC::EconPreviewDataBlockRequest(GCMessageRead &messageRead)
