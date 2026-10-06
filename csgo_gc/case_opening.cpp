@@ -1,12 +1,12 @@
 #include "stdafx.h"
 #include "case_opening.h"
 #include "config.h"
+#include "item.h"
 #include "item_schema.h"
 #include "random.h"
 
-CaseOpening::CaseOpening(const ItemSchema &itemSchema, const GCConfig &config, Random &random)
+CaseOpening::CaseOpening(const ItemSchema &itemSchema, Random &random)
     : m_itemSchema{ itemSchema }
-    , m_config{ config }
     , m_random{ random }
 {
 }
@@ -30,12 +30,12 @@ static bool GetLootListItems(const LootList &lootList, std::vector<const LootLis
 }
 
 static bool CompareRarity(const LootListItem *a, const LootListItem *b) { return a->CaseRarity() < b->CaseRarity(); }
-static bool RarityLower(const LootListItem *a, uint32_t b) { return a->CaseRarity() < b; }
-static bool RarityUpper(uint32_t a, const LootListItem *b) { return a < b->CaseRarity(); }
+static bool RarityLower(const LootListItem *a, Rarity b) { return a->CaseRarity() < b; }
+static bool RarityUpper(Rarity a, const LootListItem *b) { return a < b->CaseRarity(); }
 
-bool CaseOpening::SelectItemFromCrate(const CSOEconItem &crate, CSOEconItem &item)
+bool CaseOpening::SelectItemFromCrate(ItemDefIndex crateDefIndex, ItemDesc &desc)
 {
-    const LootList *lootList = m_itemSchema.GetCrateLootList(crate.def_index());
+    const LootList *lootList = m_itemSchema.GetCrateLootList(crateDefIndex);
     if (!lootList)
     {
         assert(false);
@@ -64,11 +64,11 @@ bool CaseOpening::SelectItemFromCrate(const CSOEconItem &crate, CSOEconItem &ite
     }
 
     bool statTrak = ShouldMakeStatTrak(*lootListItem, *lootList, containsUnusuals);
-    return m_itemSchema.CreateItemFromLootListItem(m_random, *lootListItem, statTrak, ItemOriginCrate, UnacknowledgedFoundInCrate, item);
+    return m_itemSchema.ItemDescForLootListItem(m_random, *lootListItem, statTrak, ItemOriginCrate, UnacknowledgedFoundInCrate, desc);
 }
 
 // get a range of loot list items with a specific rarity from a vector sorted by rarity
-static std::pair<size_t, size_t> FindRarityRange(const std::vector<const LootListItem *> &items, uint32_t rarity)
+static std::pair<size_t, size_t> FindRarityRange(const std::vector<const LootListItem *> &items, Rarity rarity)
 {
     // MUST have items and they MUST be sorted
     assert(items.size() && std::is_sorted(items.begin(), items.end(), CompareRarity));
@@ -84,7 +84,7 @@ static std::pair<size_t, size_t> FindRarityRange(const std::vector<const LootLis
 
 const LootListItem *CaseOpening::SelectLootListItem(const std::vector<const LootListItem *> &items)
 {
-    uint32_t rarity = RandomRarityForItems(items);
+    Rarity rarity = RandomRarityForItems(items);
 
     auto [begin, end] = FindRarityRange(items, rarity);
     if (begin == end)
@@ -97,7 +97,7 @@ const LootListItem *CaseOpening::SelectLootListItem(const std::vector<const Loot
     return items[index];
 }
 
-uint32_t CaseOpening::RandomRarityForItems(const std::vector<const LootListItem *> &items)
+Rarity CaseOpening::RandomRarityForItems(const std::vector<const LootListItem *> &items)
 {
     // MUST have items and they MUST be sorted
     assert(items.size() && std::is_sorted(items.begin(), items.end(), CompareRarity));
@@ -110,8 +110,8 @@ uint32_t CaseOpening::RandomRarityForItems(const std::vector<const LootListItem 
     // items are sorted by rarity, so iterate through the available rarities like this
     for (size_t i = 0; i < items.size(); i++)
     {
-        uint32_t rarity = items[i]->CaseRarity();
-        float weight = m_config.GetRarityWeight(rarity);
+        Rarity rarity = items[i]->CaseRarity();
+        float weight = GetConfig().GetRarityWeight(rarity);
 
         weights.push_back({ rarity, weight });
         totalWeight += weight;
@@ -137,7 +137,7 @@ uint32_t CaseOpening::RandomRarityForItems(const std::vector<const LootListItem 
     }
 
     assert(false);
-    return 0;
+    return Rarity::Default;
 }
 
 bool CaseOpening::ShouldMakeStatTrak(const LootListItem &item, const LootList &lootList, bool containsUnusuals)
@@ -155,8 +155,8 @@ bool CaseOpening::ShouldMakeStatTrak(const LootListItem &item, const LootList &l
     }
 
     // unusual stattraks only valid below id 1000
-    if (item.quality == ItemSchema::QualityUnusual
-        && item.itemInfo->m_defIndex >= 1000)
+    if (item.quality == Quality::Unusual
+        && item.itemInfo->m_defIndex >= ToEnum<ItemDefIndex>(1000u))
     {
         return false;
     }

@@ -28,7 +28,6 @@ public:
     KeyValueParser(std::string_view str)
         : m_ptr{ str.begin() }
         , m_end{ str.end() }
-        , m_lineNumber{ 1 }
     {
     }
 
@@ -48,26 +47,26 @@ public:
                 break;
             }
 
-            if (*m_ptr == '\n')
-            {
-                m_lineNumber++;
-            }
-
             m_ptr++;
         }
 
-        if (m_ptr[0] != '/' || m_ptr[1] != '/')
+        if (m_ptr + 1 >= m_end || m_ptr[0] != '/' || m_ptr[1] != '/')
         {
             return true;
         }
 
         m_ptr += 2;
 
-        while (*m_ptr != '\n')
+        while (true)
         {
             if (IsEndOfFile())
             {
                 return false;
+            }
+
+            if (*m_ptr == '\n')
+            {
+                break;
             }
 
             m_ptr++;
@@ -89,7 +88,10 @@ public:
 
         size_t length = m_ptr - start;
 
-        m_ptr++; // skip the end quote
+        if (!IsEndOfFile())
+        {
+            m_ptr++; // skip the end quote
+        }
 
         return { &start[0], length };
     }
@@ -111,12 +113,9 @@ private:
 
     std::string_view::const_iterator m_ptr;
     std::string_view::const_iterator m_end;
-
-    // for error reports
-    int m_lineNumber;
 };
 
-static std::string LoadFile(const char *path)
+std::string LoadFile(const char *path)
 {
     FILE *f = fopen(path, "rb");
     if (!f)
@@ -152,11 +151,18 @@ bool KeyValue::ParseFromFile(const char *path)
     std::string data = LoadFile(path);
     if (data.empty())
     {
+        Platform::Print("Could not load {} (or empty)\n", path);
         return false;
     }
 
     KeyValueParser parser{ data };
-    return Parse(parser);
+    if (!Parse(parser))
+    {
+        Platform::Print("Could not parse {}\n", path);
+        return false;
+    }
+
+    return true;
 }
 
 bool KeyValue::WriteToFile(const char *path)
@@ -164,12 +170,30 @@ bool KeyValue::WriteToFile(const char *path)
     FILE *f = fopen(path, "wb");
     if (!f)
     {
+        Platform::Print("Could not open {} for writing\n", path);
         return false;
     }
 
     WriteToFile(f, 0);
 
-    fclose(f);
+    bool writeFailed = ferror(f) != 0;
+    int closeError = (fclose(f) == EOF) ? errno : 0;
+
+    if (writeFailed)
+    {
+        Platform::Print("Writing {} failed\n", path);
+        return false;
+    }
+
+    if (closeError != 0)
+    {
+        Platform::Print("Closing {} failed: {} ({})\n",
+            path,
+            strerror(closeError),
+            closeError);
+        return false;
+    }
+
     return true;
 }
 

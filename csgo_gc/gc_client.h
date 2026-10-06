@@ -3,45 +3,31 @@
 #include "config.h"
 #include "gc_shared.h"
 #include "inventory.h"
-#include "networking_client.h"
 
-struct MicroTxnAuthorizationResponse_t;
-class ServerGC;
-
-struct Transaction
-{
-    uint64_t id;
-    std::vector<uint64_t> itemIds;
-};
+class CMsgClientWelcome;
+class CMsgCStrike15Welcome;
+class CMsgGCCStrike15_v2_MatchmakingGC2ClientHello;
 
 class ClientGC final : public SharedGC
 {
 public:
-    ClientGC(uint64_t steamId, ISteamNetworking *networking);
+    ClientGC(uint64_t steamId);
     ~ClientGC();
 
-    void HandleMessage(uint32_t type, const void *data, uint32_t size);
-
-    void Update();
-
-    // purchases
-    bool GetMicroTransactionResponse(MicroTxnAuthorizationResponse_t &response);
-
-    // called from net code
-    void SendSOCacheToGameSever();
-    void HandleNetMessage(GCMessageRead &messageRead);
-
-    // Listen-server (offline/bots) mode: bypass P2P and inject directly into ServerGC
-    void SetListenServer(ServerGC *serverGC, uint64_t serverSteamId);
-
-    // passed to net code
-    void SetAuthTicket(uint32_t handle, const void *data, uint32_t size);
-    void ClearAuthTicket(uint32_t handle);
-
 private:
+    void HandleEvent(GCEvent type, uint64_t id, const std::vector<uint8_t> &buffer) override;
+
+    // event handlers
+    void HandleMessage(uint32_t type, const void *data, uint32_t size);
+    void HandleNetMessage(const void *data, uint32_t size);
+    void HandleSOCacheRequest();
+    void InventoryUpdate();
+
     // send to the local game and the game server we're connected to (if we're connected)
     void SendMessageToGame(bool sendToGameServer, uint32_t type,
         const google::protobuf::MessageLite &message, uint64_t jobId = JobIdInvalid);
+
+    void SendInventoryChangeMessages(const InventoryChangeMessages &messages);
 
     void OnClientHello(GCMessageRead &messageRead);
     void AdjustItemEquippedState(GCMessageRead &messageRead);
@@ -55,11 +41,15 @@ private:
     void StorePurchaseInit(GCMessageRead &messageRead);
     void StorePurchaseFinalize(GCMessageRead &messageRead);
 
+    void DeleteItem(GCMessageRead &messageRead);
     void UnlockCrate(GCMessageRead &messageRead);
-    void EconPreviewDataBlockRequest(GCMessageRead &messageRead);
     void NameItem(GCMessageRead &messageRead);
     void NameBaseItem(GCMessageRead &messageRead);
     void RemoveItemName(GCMessageRead &messageRead);
+
+    void ProcessCasketItemLoadContents(GCMessageRead &messageRead);
+    void ProcessCasketItemAdd(GCMessageRead &messageRead);
+    void ProcessCasketItemExtract(GCMessageRead &messageRead);
 
     void BuildMatchmakingHello(CMsgGCCStrike15_v2_MatchmakingGC2ClientHello &message);
     void BuildClientWelcome(CMsgClientWelcome &message, const CMsgCStrike15Welcome &csWelcome,
@@ -69,11 +59,10 @@ private:
     uint32_t AccountId() const { return m_steamId & 0xffffffff; }
 
     const uint64_t m_steamId;
-    NetworkingClient m_networking;
 
-    GCConfig m_config;
     Inventory m_inventory;
 
     // microtransactions, we only have one going at a time
-    Transaction m_transaction{};
+    uint64_t m_transactionId{};
+    std::vector<uint64_t> m_transactionItemIds;
 };

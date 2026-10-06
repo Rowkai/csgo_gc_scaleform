@@ -16,6 +16,9 @@
 "player_level"	"39"
 "player_cur_xp"	"4999"
 
+"country"	"FI"
+"currency"	"2"
+
 // these are the same weights valve uses
 "rarity_weights"
 {
@@ -30,3 +33,22 @@
 
 // remove keys, cases, stickers, etc. after they've been used
 "destroy_used_items"	"1"
+
+// steam related options
+
+// specifies what app id to use for the game. csgo/steam.inf is automatically modified if necessary, and the SteamAppId
+// environment variable is set. when using csgo_gc, this is the only thing you need to modify to switch app ids
+"appid_override"	"4465480" // new csgo appid
+
+// only show servers with the "csgo_gc" tag in the server browser
+"show_csgo_gc_servers_only"	"1"
+
+// 0 = don't log anything
+// 1 = log to in-game console
+// 2 = log to in-game console and file (gc_log.txt)
+"log_output"	"1"
+
+// allow an inventory editor with this Origin to
+// connect to the websocket server at 127.0.0.1:13001
+// empty or null means the server is disabled
+"inventory_editor_origin"	"https://mikkokko.github.io"

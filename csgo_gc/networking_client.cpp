@@ -1,56 +1,49 @@
 #include "stdafx.h"
 #include "networking_client.h"
 #include "gc_client.h"
-#include "gc_server.h"
 
-NetworkingClient::NetworkingClient(ClientGC *clientGC, ISteamNetworking *networking)
-    : m_clientGC{ clientGC }
-    , m_networking{ networking }
+NetworkingClient::NetworkingClient(ISteamNetworkingMessages *networkingMessages)
+    : m_networkingMessages{ networkingMessages }
     , m_sessionRequest{ this, &NetworkingClient::OnSessionRequest }
     , m_sessionFailed{ this, &NetworkingClient::OnSessionFailed }
 {
 }
 
-void NetworkingClient::Update()
+void NetworkingClient::Update(ClientGC *gc)
 {
-    uint32_t messageSize;
-    while (m_networking->IsP2PPacketAvailable(&messageSize, NetMessageChannel))
+    SteamNetworkingMessage_t *message;
+    while (m_networkingMessages->ReceiveMessagesOnChannel(NetMessageChannel, &message, 1))
     {
-        std::vector<uint8_t> buffer(messageSize);
-        CSteamID steamId;
-        uint32_t bytesRead = 0;
-        
-        if (!m_networking->ReadP2PPacket(buffer.data(), messageSize, &bytesRead, &steamId, NetMessageChannel))
-        {
-            assert(false);
-            continue;
-        }
-
-        uint64_t steamId64 = steamId.ConvertToUint64();
+        uint64_t steamId = message->m_identityPeer.GetSteamID64();
 
         // pass 0 as type so it gets parsed from the message
-        GCMessageRead messageRead{ 0, buffer.data(), bytesRead };
+        GCMessageRead messageRead{ 0, message->GetData(), message->GetSize() };
         if (!messageRead.IsValid())
         {
             assert(false);
+            message->Release();
             continue;
         }
 
-        if (HandleMessage(steamId64, messageRead))
+        if (HandleMessage(gc, steamId, messageRead))
         {
             // that was an internal message
+            message->Release();
             continue;
         }
 
         // don't pass messages to the gc unless it's our gameserver
-        if (!m_serverSteamId || steamId64 != m_serverSteamId)
+        if (!m_serverSteamId || steamId != m_serverSteamId)
         {
-            Platform::Print("NetworkingClient: ignored message from %llu (not our gs %llu)\n", steamId64, m_serverSteamId);
+            Platform::Print("NetworkingClient: ignored message from {} (not our gs {})\n", steamId, m_serverSteamId);
+            message->Release();
             continue;
         }
 
         // let the gc have a whack at it
-        m_clientGC->HandleNetMessage(messageRead);
+        gc->PostToGC(GCEvent::NetMessage, 0, message->GetData(), message->GetSize());
+
+        message->Release();
     }
 }
 
@@ -68,7 +61,7 @@ static bool ValidateTicket(std::unordered_map<uint32_t, AuthTicket> &tickets, ui
     return false;
 }
 
-bool NetworkingClient::HandleMessage(uint64_t steamId, GCMessageRead &message)
+bool NetworkingClient::HandleMessage(ClientGC *gc, uint64_t steamId, GCMessageRead &message)
 {
     if (message.IsProtobuf())
     {
@@ -83,19 +76,19 @@ bool NetworkingClient::HandleMessage(uint64_t steamId, GCMessageRead &message)
         const void *ticket = message.ReadData(ticketSize);
         if (!message.IsValid())
         {
-            Platform::Print("NetworkingClient: ignored connection from %llu (malfored message)\n", steamId);
+            Platform::Print("NetworkingClient: ignored connection from {} (malfored message)\n", steamId);
             return true;
         }
 
         if (!ValidateTicket(m_tickets, steamId, ticket, ticketSize))
         {
-            Platform::Print("NetworkingClient: ignored connection from %llu (ticket mismatch)\n", steamId);
+            Platform::Print("NetworkingClient: ignored connection from {} (ticket mismatch)\n", steamId);
             return true;
         }
 
-        Platform::Print("NetworkingClient: sending socache to %llu\n", steamId);
+        Platform::Print("NetworkingClient: sending socache to {}\n", steamId);
         m_serverSteamId = steamId;
-        m_clientGC->SendSOCacheToGameSever();
+        gc->PostToGC(GCEvent::SOCacheRequest, 0, nullptr, 0);
 
         return true;
     }
@@ -103,37 +96,26 @@ bool NetworkingClient::HandleMessage(uint64_t steamId, GCMessageRead &message)
     return false;
 }
 
-void NetworkingClient::SetListenServer(ServerGC *serverGC, uint64_t serverSteamId)
+void NetworkingClient::SendMessage(const void *data, uint32_t size)
 {
-    m_listenServerGC = serverGC;
-    m_listenServerSteamId = serverSteamId;
-}
-
-void NetworkingClient::SendMessage(const GCMessageWrite &message)
-{
-    if (m_serverSteamId)
+    if (!m_serverSteamId)
     {
-        // connected via P2P (dedicated server or LAN)
-        CSteamID steamId;
-        steamId.SetFromUint64(m_serverSteamId);
-
-        bool result = m_networking->SendP2PPacket(
-            steamId,
-            message.Data(),
-            message.Size(),
-            NetMessageSendType,
-            NetMessageChannel);
-
-        assert(result);
-        (void)result;
+        // not connected to a server
+        return;
     }
-    else if (m_listenServerGC)
-    {
-        // listen-server (offline/bots) mode: inject the GC message directly into the server
-        // since there is no game-server Steam networking available to do P2P with ourselves
-        m_listenServerGC->HandleNetMessage(m_listenServerSteamId, message.Data(), message.Size());
-    }
-    // else: not connected to any server, silently drop
+
+    // mikkotodo check return
+    SteamNetworkingIdentity identity;
+    identity.SetSteamID64(m_serverSteamId);
+
+    [[maybe_unused]] EResult result = m_networkingMessages->SendMessageToUser(
+        identity,
+        data,
+        size,
+        NetMessageSendFlags,
+        NetMessageChannel);
+
+    assert(result == k_EResultOK);
 }
 
 void NetworkingClient::SetAuthTicket(uint32_t handle, const void *data, uint32_t size)
@@ -156,12 +138,12 @@ void NetworkingClient::ClearAuthTicket(uint32_t handle)
 
     if (it->second.steamId)
     {
-        Platform::Print("NetworkingClient: closing p2p session with %llu\n", it->second.steamId);
+        Platform::Print("NetworkingClient: closing p2p session with {}\n", it->second.steamId);
 
         // we had a session so close the connection
-        CSteamID steamId;
-        steamId.SetFromUint64(it->second.steamId);
-        m_networking->CloseP2PChannelWithUser(steamId, NetMessageChannel);
+        SteamNetworkingIdentity identity;
+        identity.SetSteamID64(it->second.steamId);
+        m_networkingMessages->CloseChannelWithUser(identity, NetMessageChannel);
 
         // was this our current gameserver? if it was, clear it
         if (it->second.steamId == m_serverSteamId)
@@ -174,19 +156,19 @@ void NetworkingClient::ClearAuthTicket(uint32_t handle)
     m_tickets.erase(it);
 }
 
-void NetworkingClient::OnSessionRequest(P2PSessionRequest_t *param)
+void NetworkingClient::OnSessionRequest(SteamNetworkingMessagesSessionRequest_t *param)
 {
-    if (!param->m_steamIDRemote.BGameServerAccount())
+    if (!param->m_identityRemote.GetSteamID().BGameServerAccount())
     {
         // csgo_gc related connections come from gameservers
         return;
     }
 
     // accept the connection, we should receive the k_EMsgNetworkConnect message
-    m_networking->AcceptP2PSessionWithUser(param->m_steamIDRemote);
+    m_networkingMessages->AcceptSessionWithUser(param->m_identityRemote);
 }
 
-void NetworkingClient::OnSessionFailed(P2PSessionConnectFail_t *param)
+void NetworkingClient::OnSessionFailed(SteamNetworkingMessagesSessionFailed_t *param)
 {
-    Platform::Print("NetworkingClient::OnSessionFailed: P2P session error %d\n", param->m_eP2PSessionError);
+    Platform::Print("NetworkingClient::OnSessionFailed: {}\n", param->m_info.m_szEndDebug);
 }

@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "platform.h"
+#include "config.h" // yuck
 #include <dlfcn.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -43,24 +44,30 @@ void Initialize()
     }
 }
 
-void Print(const char *format, ...)
+void PrintV(std::string_view fmt, std::format_args args)
 {
-    va_list ap;
-    char buffer[4096];
+    LogOutput logOutput = GetConfig().GetLogOutput();
+    if (logOutput <= LogOutputNone)
+    {
+        // no logging
+        return;
+    }
 
-    va_start(ap, format);
-    vsnprintf(buffer, sizeof(buffer), format, ap);
-    va_end(ap);
+    std::string buffer = std::vformat(fmt, args);
 
     if (s_ConColorMsg)
     {
         uint8_t color[4] = { 0, 255, 128, 255 };
-        s_ConColorMsg(color, "[GC] %s", buffer);
+        s_ConColorMsg(color, "[GC] %s", buffer.c_str());
     }
 
-    FILE *f = fopen("gc_log.txt", "a");
-    fprintf(f, "%s", buffer);
-    fclose(f);
+    // optionally also log to file
+    if (logOutput >= LogOutputFile)
+    {
+        FILE *f = fopen("gc_log.txt", "a");
+        fprintf(f, "%s", buffer.c_str());
+        fclose(f);
+    }
 }
 
 void Error(const char *format, ...)
@@ -216,23 +223,22 @@ bool SteamClientPath(void *buffer, size_t bufferSize)
     return true;
 }
 
-void *SteamClientFactory(const void *pathBuffer)
+void *LoadDynamicLibrary(const void *pathBuffer)
 {
-    void *steamclient = dlopen(reinterpret_cast<const char *>(pathBuffer), RTLD_NOW);
-    if (!steamclient)
-    {
-        return nullptr;
-    }
-
-    return dlsym(steamclient, "CreateInterface");
+    return dlopen(reinterpret_cast<const char *>(pathBuffer), RTLD_NOW);
 }
 
-void EnsureEnvVarSet(const char *name, const char *value)
+void *GetSymbol(void *handle, const char *symbol)
 {
-    setenv(name, value, 0);
+    return dlsym(handle, symbol);
 }
 
-static void CopyToReadOnly(void *dest, const void *src, size_t size)
+void SetEnvVar(const char *name, const char *value)
+{
+    setenv(name, value, 1);
+}
+
+static void CopyToReadOnly(void *dest, const void *src, size_t size, int oldFlags)
 {
     size_t pageSize = sysconf(_SC_PAGESIZE);
     void *alignedAddress = (void *)((size_t)dest & ~(pageSize - 1));
@@ -242,12 +248,12 @@ static void CopyToReadOnly(void *dest, const void *src, size_t size)
     assert(alignedAddress <= dest);
     assert(alignedSize >= size);
 
-    int result = mprotect(alignedAddress, alignedSize, PROT_READ | PROT_WRITE);
+    int result = mprotect(alignedAddress, alignedSize, oldFlags | PROT_WRITE);
     assert(result == 0);
 
     memcpy(dest, src, size);
 
-    result = mprotect(alignedAddress, alignedSize, PROT_READ);
+    result = mprotect(alignedAddress, alignedSize, oldFlags);
     assert(result == 0);
 }
 
@@ -255,7 +261,7 @@ bool PatchGraffitiPublicKey(std::string_view moduleName, const void *original, c
 {
     std::string actualModuleName;
 
-#if defined(__APPLE)
+#if defined(__APPLE__)
     actualModuleName.assign(moduleName);
     actualModuleName.append(".dylib");
 
@@ -289,8 +295,177 @@ bool PatchGraffitiPublicKey(std::string_view moduleName, const void *original, c
         return false;
     }
 
-    CopyToReadOnly(address, replacement, size);
+    CopyToReadOnly(address, replacement, size, PROT_READ);
     return true;
+}
+
+// FIXME: generalize and use for graffiti public key as well
+#if defined(__APPLE__)
+static bool GetModuleCodeSection(mach_header_64 *header, intptr_t slide, uint8_t **pstart, uint8_t **pend)
+{
+    uint8_t *cmd = (uint8_t *)(header + 1);
+
+    for (uint32_t i = 0; i < header->ncmds; i++)
+    {
+        load_command *lc = (load_command *)cmd;
+        if (lc->cmd == LC_SEGMENT_64)
+        {
+            segment_command_64 *seg = (segment_command_64 *)lc;
+            if (!strcmp(seg->segname, "__TEXT"))
+            {
+                section_64 *sect = (section_64 *)(seg + 1);
+                for (uint32_t j = 0; j < seg->nsects; j++)
+                {
+                    if (!strcmp(sect[j].sectname, "__text"))
+                    {
+                        *pstart = reinterpret_cast<uint8_t *>(sect[j].addr + slide);
+                        *pend = *pstart + sect[j].size;
+                        return true;
+                    }
+                }
+            }
+        }
+
+        cmd += lc->cmdsize;
+    }
+
+    return false;
+}
+
+static bool GetCodeSection(const char *name, uint8_t **pstart, uint8_t **pend)
+{
+    uint32_t imageCount = _dyld_image_count();
+
+    for (uint32_t i = 0; i < imageCount; i++)
+    {
+        const char *fullName = _dyld_get_image_name(i);
+        if (fullName && strstr(fullName, name))
+        {
+            // assume 64 bit, don't even check
+            mach_header_64 *header = (mach_header_64 *)_dyld_get_image_header(i);
+            intptr_t slide = _dyld_get_image_vmaddr_slide(i);
+            return GetModuleCodeSection(header, slide, pstart, pend);
+        }
+    }
+
+    return false;
+}
+#else
+static bool GetCodeSection(const char *name, uint8_t **pstart, uint8_t **pend)
+{
+    struct SectionInfo
+    {
+        const char *searchName;
+        uint8_t *start, *end;
+    };
+
+    SectionInfo info{};
+    info.searchName = name;
+
+    auto callback = [](dl_phdr_info *info, size_t, void *data)
+    {
+        SectionInfo *sectionInfo = static_cast<SectionInfo *>(data);
+
+        if (strstr(info->dlpi_name, sectionInfo->searchName))
+        {
+            for (int i = 0; i < info->dlpi_phnum; i++)
+            {
+                if (info->dlpi_phdr[i].p_type == PT_LOAD && (info->dlpi_phdr[i].p_flags & PF_X))
+                {
+                    sectionInfo->start = reinterpret_cast<uint8_t *>(info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
+                    sectionInfo->end = sectionInfo->start + info->dlpi_phdr[i].p_memsz;
+                    return 1;
+                }
+            }
+        }
+
+        return 0;
+    };
+
+    if (dl_iterate_phdr(callback, &info))
+    {
+        *pstart = info.start;
+        *pend = info.end;
+        return true;
+    }
+
+    return false;
+}
+#endif
+
+static uint8_t *FindUint32FromCode(uint8_t *start, uint8_t *end, uint32_t value)
+{
+    void *result = memmem(start, end - start, &value, sizeof(value));
+    return static_cast<uint8_t *>(result);
+}
+
+// the server browser filters out servers with appid < 200 or > 900 unless it's garry's mod,
+// so replace gmod appid (4000) with the requested one
+bool PatchServerBrowserAppId(uint32_t appId)
+{
+    uint8_t *codeStart, *codeEnd;
+
+#if defined(__APPLE__)
+    bool success = GetCodeSection("serverbrowser.dylib", &codeStart, &codeEnd);
+#else
+    bool success = GetCodeSection("serverbrowser_client.so", &codeStart, &codeEnd);
+    if (!success)
+    {
+        success = GetCodeSection("serverbrowser.so", &codeStart, &codeEnd);
+    }
+#endif
+
+    if (!success)
+    {
+        // shouldn't happen
+        return false;
+    }
+
+    // FIXME: what would be an actually suitable delta? 64 is an overkill
+    constexpr size_t MaxDelta = 64;
+    uint8_t *searchStart = codeStart;
+
+    while (searchStart < codeEnd)
+    {
+        // look for gmod first
+        uint8_t *ptr4000 = FindUint32FromCode(searchStart, codeEnd, 4000);
+        if (!ptr4000)
+        {
+            break;
+        }
+
+        // look up min and max addresses for 200 and 900
+        // this is effectively always an overkill, but we want to make sure
+        uint8_t *rangeStart = (ptr4000 >= codeStart + MaxDelta) ? (ptr4000 - MaxDelta) : codeStart;
+        uint8_t *rangeEnd = (ptr4000 + MaxDelta <= codeEnd) ? (ptr4000 + MaxDelta) : codeEnd;
+
+        // might compile to 199 or 901, so check all 4 and patch if 2 are found (bruh)
+        bool foundLow = FindUint32FromCode(rangeStart, rangeEnd, 200);
+        if (!foundLow)
+        {
+            foundLow = FindUint32FromCode(rangeStart, rangeEnd, 199);
+        }
+
+        bool foundHigh = FindUint32FromCode(rangeStart, rangeEnd, 900);
+        if (!foundHigh)
+        {
+            foundHigh = FindUint32FromCode(rangeStart, rangeEnd, 901);
+        }
+
+        if (foundLow && foundHigh)
+        {
+            CopyToReadOnly(ptr4000, &appId, sizeof(uint32_t), PROT_READ | PROT_EXEC);
+
+            // might want to do this since we're patching so late
+            __builtin___clear_cache((char *)ptr4000, (char *)ptr4000 + sizeof(uint32_t));
+
+            return true;
+        }
+
+        searchStart = ptr4000 + 1;
+    }
+
+    return false;
 }
 
 } // namespace Platform

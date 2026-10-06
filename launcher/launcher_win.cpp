@@ -41,14 +41,30 @@ DLL_EXPORT int RuntimeCheck(int, int)
 #if defined(DEDICATED)
 #define LAUNCHER_LIB "dedicated"
 #define SYMBOL_NAME "DedicatedMain"
-typedef int (*LauncherMain_t)(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd);
 #else
 #define LAUNCHER_LIB "launcher"
 #define SYMBOL_NAME "LauncherMain"
-typedef int (*LauncherMain_t)(bool bSecure, HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd);
 #endif
 
-typedef void (*InstallGC_t)(bool dedicated);
+typedef int (*OldLauncherMain_t)(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd);
+typedef int (*NewLauncherMain_t)(bool bSecure, HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd);
+
+// FIXME: is this reliable enough? necroed code from ages ago, not sure how well it was tested
+static bool UseNewLauncherMain(const void *prologue)
+{
+#if defined(DEDICATED) || !defined(_M_IX86)
+    return false;
+#else
+    const uint8_t *p = static_cast<const uint8_t *>(prologue);
+
+    return (p[0] == 0x55 // push ebp
+        && p[1] == 0x8B && p[2] == 0xEC // mov ebp, esp
+        && p[6] == 0x8B && p[7] == 0x45 && p[8] == 0x0C); // mov eax, [ebp+0x0C]
+#endif
+}
+
+// csgo_gc/main.cpp
+void InstallGC(bool dedicated);
 
 static void ErrorMessageBox(const wchar_t *format, ...)
 {
@@ -182,18 +198,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     _snwprintf_s(modulePath, std::size(modulePath), L"%ls\\bin\\" GC_LIB_DIR "\\" LAUNCHER_LIB GC_LIB_SUFFIX GC_LIB_EXTENSION, baseDir);
-    LauncherMain_t LauncherMain = (LauncherMain_t)LoadModuleAndFindSymbol(modulePath, SYMBOL_NAME);
+    void *LauncherMain = LoadModuleAndFindSymbol(modulePath, SYMBOL_NAME);
     if (!LauncherMain)
-    {
-        // LoadModuleAndFindSymbol told us why
-        return 1;
-    }
-
-    _snwprintf_s(modulePath, std::size(modulePath), L"%ls\\csgo_gc\\" GC_LIB_DIR "\\"
-                                                    "csgo_gc" GC_LIB_EXTENSION,
-        baseDir);
-    InstallGC_t InstallGC = (InstallGC_t)LoadModuleAndFindSymbol(modulePath, "InstallGC");
-    if (!InstallGC)
     {
         // LoadModuleAndFindSymbol told us why
         return 1;
@@ -205,9 +211,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     InstallGC(false);
 #endif
 
-#if defined(DEDICATED)
-    return LauncherMain(hInstance, hPrevInstance, lpCmdLine, nShowCmd);
-#else
-    return LauncherMain(true, hInstance, hPrevInstance, lpCmdLine, nShowCmd);
-#endif
+    if (UseNewLauncherMain(LauncherMain))
+    {
+        return static_cast<NewLauncherMain_t>(LauncherMain)(true, hInstance, hPrevInstance, lpCmdLine, nShowCmd);
+    }
+    else
+    {
+        return static_cast<OldLauncherMain_t>(LauncherMain)(hInstance, hPrevInstance, lpCmdLine, nShowCmd);
+    }
 }

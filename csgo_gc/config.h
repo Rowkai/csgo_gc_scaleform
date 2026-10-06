@@ -1,18 +1,35 @@
 #pragma once
 
 #include "gc_const_csgo.h"
-#include "item_schema.h" // rarity constants
+#include "item_schema_const.h" // rarity constants
 
 struct RarityWeight
 {
-    uint32_t rarity;
+    Rarity rarity;
     float weight;
+};
+
+// for Platform::Print calls
+enum LogOutput
+{
+    LogOutputNone, // don't output anything
+    LogOutputConsole, // game console
+    LogOutputFile // game console and gc_log.txt
 };
 
 class GCConfig
 {
 public:
     GCConfig();
+
+    // options used by platform layer (bruh)
+    LogOutput GetLogOutput() const { return m_logOutput; }
+
+    // options used by steam hook
+    uint32_t AppIdOverride() const { return m_appIdOverride; }
+    bool ShowCsgoGCServersOnly() const { return m_showCsgoGCServersOnly; }
+
+    const std::string &InventoryEditorOrigin() const { return m_inventoryEditorOrigin; }
 
     RankId CompetitiveRank() const { return m_competitiveRank; }
     int CompetitiveWins() const { return m_competitiveWins; }
@@ -30,9 +47,21 @@ public:
     int Level() const { return m_level; }
     int Xp() const { return m_xp; }
 
-    float GetRarityWeight(uint32_t rarity) const;
+    const std::string &Country() const { return m_country; }
+    const uint32_t Currency() const { return m_currency; }
+
+    float GetRarityWeight(Rarity rarity) const;
 
 private:
+    LogOutput m_logOutput{ LogOutputConsole };
+
+    // actually default to 4465480 instead of 730, people are going to use old configs
+    // and then wonder why the game doesn't work and open an issue on github otherwise
+    uint32_t m_appIdOverride{ 4465480 };
+    bool m_showCsgoGCServersOnly{ true };
+
+    std::string m_inventoryEditorOrigin;
+
     RankId m_competitiveRank{ RankNone };
     int m_competitiveWins{ 0 };
     RankId m_wingmanRank{ RankNone };
@@ -49,14 +78,19 @@ private:
     int m_level{ 0 };
     int m_xp{ 0 };
 
+    std::string m_country{ "FI" };
+    int m_currency{ 2 };
+
     // default to valve weights
     std::vector<RarityWeight> m_rarityWeights{
-        { ItemSchema::RarityCommon, 10000000 },
-        { ItemSchema::RarityUncommon, 2000000 },
-        { ItemSchema::RarityRare, 400000 },
-        { ItemSchema::RarityMythical, 80000 },
-        { ItemSchema::RarityLegendary, 16000 },
-        { ItemSchema::RarityAncient, 3200 },
-        { ItemSchema::RarityUnusual, 1280 },
+        { Rarity::Common, 10000000 },
+        { Rarity::Uncommon, 2000000 },
+        { Rarity::Rare, 400000 },
+        { Rarity::Mythical, 80000 },
+        { Rarity::Legendary, 16000 },
+        { Rarity::Ancient, 3200 },
+        { Rarity::Unusual, 1280 },
     };
 };
+
+const GCConfig &GetConfig();

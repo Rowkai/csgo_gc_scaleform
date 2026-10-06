@@ -1,9 +1,10 @@
 #include "stdafx.h"
 #include "gc_message.h"
 
+#include "steammessages.pb.h"
+
 GCMessageRead::GCMessageRead(uint32_t type, const void *data, uint32_t size)
-    : m_data{ static_cast<const uint8_t *>(data) }
-    , m_size{ size }
+    : MessageRead{ data, size }
 {
     m_type = ReadUint32();
     if (!IsValid())
@@ -50,59 +51,14 @@ GCMessageRead::GCMessageRead(uint32_t type, const void *data, uint32_t size)
     }
     else
     {
-        // reading a GameStructMsgHeader (GCMsgHdrEx_t = 34 bytes total):
-        //   uint32  m_eMsg            ← already consumed above (offset 0)
-        //   uint32  m_nSrcGCDirIndex  (offset 4)
-        //   uint64  m_ulSteamID       (offset 8)
-        //   uint16  m_nHdrVersion     (offset 16)
-        //   uint64  m_JobIDTarget     (offset 18) ← keyId for UnlockCrate
-        //   uint64  m_JobIDSource     (offset 26) ← save as m_jobId for response routing
-        
-        // Log the raw bytes for debugging
-        if (size >= 34)
-        {
-            Platform::Print("[STRUCT MSG %u] Raw 34 bytes from offset 0: ", m_type);
-            for (int i = 0; i < 34; i++)
-            {
-                Platform::Print("%02X ", m_data[i]);
-            }
-            Platform::Print("\n");
-        }
-        
-        ReadUint32();                    // m_nSrcGCDirIndex
-        ReadUint64();                    // m_ulSteamID
-        ReadUint16();                    // m_nHdrVersion
-        m_jobIdTarget = ReadUint64();    // m_JobIDTarget → keyId for UnlockCrate
-        m_jobId = ReadUint64();          // m_JobIDSource
-        
-        Platform::Print("[STRUCT MSG %u] Parsed: offset now at %u, jobIdTarget=%llu, jobIdSource=%llu\n", 
-                        m_type, m_offset, m_jobIdTarget, m_jobId);
+        // reading a GameStructMsgHeader
+        ReadUint32();
+        ReadUint64();
+        ReadUint16();
     }
 
     // caller needs to check for this
     assert(IsValid());
-}
-
-const void *GCMessageRead::ReadData(size_t size)
-{
-    if (m_error)
-    {
-        // shouldn't get called
-        assert(false);
-        return nullptr;
-    }
-
-    if (m_offset + size > m_size)
-    {
-        // overflow
-        assert(false);
-        m_error = true;
-        return nullptr;
-    }
-
-    const void *result = &m_data[m_offset];
-    m_offset += size;
-    return result;
 }
 
 // mikkotodo fix!!! this function is fucked and broken
@@ -143,10 +99,9 @@ static void AppendProtobuf(std::vector<uint8_t> &buffer, const google::protobuf:
 }
 
 GCMessageWrite::GCMessageWrite(uint32_t type, const google::protobuf::MessageLite &message, uint64_t jobId)
-    : m_type{ type | ProtobufMask }
 {
     // write the protobuf message hader
-    WriteUint32(m_type);
+    WriteUint32(type | ProtobufMask);
 
     if (jobId != JobIdInvalid)
     {
@@ -169,59 +124,19 @@ GCMessageWrite::GCMessageWrite(uint32_t type, const google::protobuf::MessageLit
 }
 
 GCMessageWrite::GCMessageWrite(uint32_t type)
-    : m_type{ type }
 {
-    // GCMsgHdrEx_t layout (packed, 34 bytes total):
-    //   uint32  m_eMsg
-    //   uint32  m_nSrcGCDirIndex
-    //   uint64  m_ulSteamID
-    //   uint16  m_nHdrVersion   (must be 1)
-    //   uint64  m_JobIDTarget   (JobIdInvalid)
-    //   uint64  m_JobIDSource   (JobIdInvalid)
-    WriteUint32(m_type);     // m_eMsg
-    WriteUint32(0);          // m_nSrcGCDirIndex
-    WriteUint64(0);          // m_ulSteamID
-    WriteUint16(1);          // m_nHdrVersion = k_nHdrVersion
-    WriteUint64(JobIdInvalid); // m_JobIDTarget
-    WriteUint64(JobIdInvalid); // m_JobIDSource
-}
-
-GCMessageWrite::GCMessageWrite(uint32_t type, uint64_t jobIdSource)
-    : m_type{ type }
-{
-    // GCMsgHdrEx_t layout with source job ID for routing responses back to client:
-    //   uint32  m_eMsg
-    //   uint32  m_nSrcGCDirIndex
-    //   uint64  m_ulSteamID
-    //   uint16  m_nHdrVersion   (must be 1)
-    //   uint64  m_JobIDTarget   (response targets the requesting job)
-    //   uint64  m_JobIDSource   (server's job ID)
-    WriteUint32(m_type);            // m_eMsg
-    WriteUint32(0);                 // m_nSrcGCDirIndex
-    WriteUint64(0);                 // m_ulSteamID
-    WriteUint16(1);                 // m_nHdrVersion = k_nHdrVersion
-    WriteUint64(jobIdSource);       // m_JobIDTarget = requesting job (for routing)
-    WriteUint64(JobIdInvalid);      // m_JobIDSource = no outgoing job
+    // write the non protobuf messge hader
+    // mikkotoodo using GameStructMsgHeader is wrong here!!! we should be using the fat one
+    // however we're not sending these to the game (yet) so it doesn't matter
+    WriteUint32(type);
+    WriteUint32(0);
+    WriteUint64(0);
+    WriteUint16(0);
 }
 
 GCMessageWrite::GCMessageWrite(const void *data, uint32_t size)
-    : m_type{ 0 } // don't know yet
 {
-    if (size >= sizeof(uint32_t))
-    {
-        m_type = *reinterpret_cast<const uint32_t *>(data);
-    }
-    else
-    {
-        assert(false);
-    }
-
+    assert(size >= sizeof(uint32_t));
     const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data);
     m_buffer.assign(bytes, bytes + size);
-}
-
-void GCMessageWrite::WriteData(const void *data, uint32_t size)
-{
-    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data);
-    m_buffer.insert(m_buffer.end(), bytes, bytes + size);
 }

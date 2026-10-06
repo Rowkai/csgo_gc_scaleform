@@ -5,6 +5,12 @@
 
 constexpr const char *ConfigFilePath = "csgo_gc/config.txt";
 
+const GCConfig &GetConfig()
+{
+    static GCConfig instance;
+    return instance;
+}
+
 GCConfig::GCConfig()
 {
     KeyValue config{ "config" };
@@ -13,6 +19,13 @@ GCConfig::GCConfig()
     {
         return;
     }
+
+    m_logOutput = config.GetNumber("log_output", m_logOutput);
+
+    m_appIdOverride = config.GetNumber("appid_override", m_appIdOverride);
+    m_showCsgoGCServersOnly = config.GetNumber("show_csgo_gc_servers_only", m_showCsgoGCServersOnly);
+
+    m_inventoryEditorOrigin = config.GetString("inventory_editor_origin");
 
     const KeyValue *ranks = config.GetSubkey("ranks");
     if (ranks)
@@ -38,7 +51,7 @@ GCConfig::GCConfig()
         for (const KeyValue &subkey : *rarityWeights)
         {
             RarityWeight weight;
-            weight.rarity = FromString<uint32_t>(subkey.Name());
+            weight.rarity = ToEnum<Rarity>(FromString<uint32_t>(subkey.Name()));
             weight.weight = FromString<float>(subkey.String());
             m_rarityWeights.push_back(weight);
         }
@@ -50,9 +63,12 @@ GCConfig::GCConfig()
     m_commendedLeader = config.GetNumber("cmd_leader", m_commendedLeader);
     m_level = config.GetNumber("player_level", m_level);
     m_xp = config.GetNumber("player_cur_xp", m_xp);
+
+    m_country = config.GetString("country", m_country);
+    m_currency = config.GetNumber("currency", m_currency);
 }
 
-float GCConfig::GetRarityWeight(uint32_t rarity) const
+float GCConfig::GetRarityWeight(Rarity rarity) const
 {
     for (const RarityWeight &weight : m_rarityWeights)
     {
