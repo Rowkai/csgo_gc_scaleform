@@ -38,7 +38,7 @@ private:
     void IncrementKillCountAttribute(GCMessageRead &messageRead);
     void ApplySticker(GCMessageRead &messageRead);
     void StoreGetUserData(GCMessageRead &messageRead);
-    void AddStoreBannerEntries(KeyValue &priceSheet);
+    void FixupStoreBanner(KeyValue &priceSheet);
     void StorePurchaseInit(GCMessageRead &messageRead);
     void StorePurchaseFinalize(GCMessageRead &messageRead);
     void EconPreviewDataBlockRequest(GCMessageRead &messageRead);

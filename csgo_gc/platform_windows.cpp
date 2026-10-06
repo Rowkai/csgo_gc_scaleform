@@ -251,4 +251,13 @@ bool PatchServerBrowserAppId(uint32_t appId)
     return false;
 }
 
+bool IsModuleLoaded(std::string_view moduleName)
+{
+    std::string actualModuleName;
+    actualModuleName.assign(moduleName);
+    actualModuleName.append(".dll");
+
+    return GetModuleHandleA(actualModuleName.c_str()) != NULL;
+}
+
 } // namespace Platform

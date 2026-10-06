@@ -257,6 +257,29 @@ static void CopyToReadOnly(void *dest, const void *src, size_t size, int oldFlag
     assert(result == 0);
 }
 
+bool IsModuleLoaded(std::string_view moduleName)
+{
+    std::string actualModuleName;
+    ModuleInfo moduleInfo;
+
+#if defined(__APPLE__)
+    actualModuleName.assign(moduleName);
+    actualModuleName.append(".dylib");
+    return GetModuleInfo(actualModuleName, moduleInfo);
+#else
+    actualModuleName.assign(moduleName);
+    actualModuleName.append("_client.so");
+    if (GetModuleInfo(actualModuleName, moduleInfo))
+    {
+        return true;
+    }
+
+    actualModuleName.assign(moduleName);
+    actualModuleName.append(".so");
+    return GetModuleInfo(actualModuleName, moduleInfo);
+#endif
+}
+
 bool PatchGraffitiPublicKey(std::string_view moduleName, const void *original, const void *replacement, size_t size)
 {
     std::string actualModuleName;

@@ -531,9 +531,25 @@ void ClientGC::ApplySticker(GCMessageRead &messageRead)
     SendInventoryChangeMessages(messages);
 }
 
-// store banner items that only link to the market can't be bought, so give each
-// of them a store entry (priced like the name tag) and point the banner at the store
-void ClientGC::AddStoreBannerEntries(KeyValue &priceSheet)
+// 2018 builds ship both uis (picked with -scaleform/-panorama) and load client_panorama for panorama.
+// builds after scaleform was removed don't have scaleformui at all (-legacyscaleformui uses scaleformui_3)
+static bool IsScaleformUI()
+{
+    if (Platform::IsModuleLoaded("client_panorama"))
+    {
+        return false;
+    }
+
+    return Platform::IsModuleLoaded("scaleformui") || Platform::IsModuleLoaded("scaleformui_3");
+}
+
+// - drop banner items this game's item schema doesn't know about, the price sheet is from a newer
+//   version and panorama shows unknown items as blank entries with garbage prices
+// - on scaleform, banner items that only link to the market can't be bought, so give each of them
+//   a store entry (priced like the name tag) and point the banner at the store. not done on panorama,
+//   it shows store entries that have a loot list as their first loot list item (they're expected to
+//   be capsule coupons), while market links show up properly as cases
+void ClientGC::FixupStoreBanner(KeyValue &priceSheet)
 {
     KeyValue *store = priceSheet.GetSubkeyMutable("store");
     if (!store)
@@ -544,6 +560,39 @@ void ClientGC::AddStoreBannerEntries(KeyValue &priceSheet)
     KeyValue *entries = store->GetSubkeyMutable("entries");
     KeyValue *banner = store->GetSubkeyMutable("store_banner_layout");
     if (!entries || !banner)
+    {
+        return;
+    }
+
+    std::vector<std::string> unknownItems;
+    std::vector<std::string> bannerItems;
+    for (const KeyValue &bannerItem : *banner)
+    {
+        ItemDefIndex defIndex = ToEnum<ItemDefIndex>(FromString<uint32_t>(bannerItem.Name()));
+        if (!m_inventory.ItemInfoByDefIndex(defIndex))
+        {
+            unknownItems.emplace_back(bannerItem.Name());
+            continue;
+        }
+
+        std::string_view marketLink = bannerItem.GetString("market_link");
+        if (marketLink.size() && marketLink != "0")
+        {
+            bannerItems.emplace_back(bannerItem.Name());
+        }
+    }
+
+    for (const std::string &name : unknownItems)
+    {
+        banner->RemoveSubkey(name);
+    }
+
+    if (unknownItems.size())
+    {
+        Platform::Print("Removed {} store banner items that don't exist in this game version\n", unknownItems.size());
+    }
+
+    if (bannerItems.empty() || !IsScaleformUI())
     {
         return;
     }
@@ -575,15 +624,6 @@ void ClientGC::AddStoreBannerEntries(KeyValue &priceSheet)
     else
     {
         templatePrices.emplace_back("USD", "1");
-    }
-
-    std::vector<std::string> bannerItems;
-    for (const KeyValue &bannerItem : *banner)
-    {
-        if (bannerItem.GetString("market_link").size())
-        {
-            bannerItems.emplace_back(bannerItem.Name());
-        }
     }
 
     for (const std::string &bannerItemName : bannerItems)
@@ -632,7 +672,7 @@ void ClientGC::StoreGetUserData(GCMessageRead &messageRead)
         return;
     }
 
-    AddStoreBannerEntries(priceSheet);
+    FixupStoreBanner(priceSheet);
 
     std::string binaryString;
     binaryString.reserve(1 << 17);

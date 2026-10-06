@@ -41,4 +41,7 @@ bool PatchGraffitiPublicKey(std::string_view moduleName, const void *original, c
 // returns true if serverbrowser was loaded and we patched it
 bool PatchServerBrowserAppId(uint32_t appId);
 
+// returns true if the module is loaded, the name is platform-agnostic like in PatchGraffitiPublicKey
+bool IsModuleLoaded(std::string_view moduleName);
+
 } // namespace Platform
