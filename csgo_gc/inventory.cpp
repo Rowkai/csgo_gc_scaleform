@@ -903,6 +903,23 @@ Item *Inventory::FindItem(uint64_t itemId)
     return nullptr;
 }
 
+bool Inventory::GetItemPreviewData(uint64_t itemId, CEconItemPreviewDataBlock &block)
+{
+    Item *item = FindItem(itemId);
+    if (!item)
+    {
+        return false;
+    }
+
+    item->ToEconItemPreviewDataBlock(block, AccountId());
+    return true;
+}
+
+const ItemInfo *Inventory::ItemInfoByDefIndex(ItemDefIndex defIndex) const
+{
+    return m_itemSchema.ItemInfoByDefIndex(defIndex);
+}
+
 static void EmbedStorageReference(InventoryModify &modify, Item &item, uint64_t storageId)
 {
     uint32_t low = (storageId & UINT32_MAX);

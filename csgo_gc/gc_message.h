@@ -14,6 +14,7 @@ public:
     uint32_t TypeUnmasked() const { return m_type & ~ProtobufMask; }
     uint32_t TypeMasked() const { return m_type; }
     uint64_t JobId() const { return m_jobId; }
+    uint32_t RemainingSize() const { return (m_offset < m_size) ? (m_size - m_offset) : 0; }
 
     template<typename T>
     bool ReadProtobuf(T &message)
@@ -45,6 +46,10 @@ public:
 
     // non protobuf messages, data written with the writer functions
     GCMessageWrite(uint32_t type);
+
+    // non protobuf messages with the extended GCMsgHdrEx_t header, for responses
+    // the game routes by job id (older builds use this for k_EMsgGCUnlockCrateResponse)
+    GCMessageWrite(uint32_t type, uint64_t jobIdTarget);
 
     // already serialized data that just gets copied over, type parsed from the message
     GCMessageWrite(const void *data, uint32_t size);

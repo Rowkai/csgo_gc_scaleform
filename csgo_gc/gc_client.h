@@ -38,8 +38,10 @@ private:
     void IncrementKillCountAttribute(GCMessageRead &messageRead);
     void ApplySticker(GCMessageRead &messageRead);
     void StoreGetUserData(GCMessageRead &messageRead);
+    void AddStoreBannerEntries(KeyValue &priceSheet);
     void StorePurchaseInit(GCMessageRead &messageRead);
     void StorePurchaseFinalize(GCMessageRead &messageRead);
+    void EconPreviewDataBlockRequest(GCMessageRead &messageRead);
 
     void DeleteItem(GCMessageRead &messageRead);
     void UnlockCrate(GCMessageRead &messageRead);

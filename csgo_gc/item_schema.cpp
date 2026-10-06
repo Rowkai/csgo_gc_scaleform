@@ -243,16 +243,43 @@ const LootList *ItemSchema::GetCrateLootList(ItemDefIndex crateDefIndex) const
         return nullptr;
     }
 
-    assert(itemSearch->second.m_supplyCrateSeries);
+    const ItemInfo &itemInfo = itemSearch->second;
 
-    auto lootListSearch = m_revolvingLootLists.find(itemSearch->second.m_supplyCrateSeries);
-    if (lootListSearch == m_revolvingLootLists.end())
+    if (itemInfo.m_supplyCrateSeries)
     {
-        assert(false);
+        auto lootListSearch = m_revolvingLootLists.find(itemInfo.m_supplyCrateSeries);
+        if (lootListSearch != m_revolvingLootLists.end())
+        {
+            return &lootListSearch->second;
+        }
+    }
+
+    // older item schemas have crates without a supply crate series
+    // that reference their loot list directly through loot_list_name
+    if (itemInfo.m_lootListName.size())
+    {
+        auto lootListSearch = m_lootLists.find(itemInfo.m_lootListName);
+        if (lootListSearch != m_lootLists.end())
+        {
+            return &lootListSearch->second;
+        }
+    }
+
+    Platform::Print("GetCrateLootList: could not resolve a loot list for {} (series {}, loot list '{}')\n",
+        itemInfo.m_name, itemInfo.m_supplyCrateSeries, itemInfo.m_lootListName);
+    assert(false);
+    return nullptr;
+}
+
+const ItemInfo *ItemSchema::ItemInfoByDefIndex(ItemDefIndex defIndex) const
+{
+    auto it = m_itemInfo.find(defIndex);
+    if (it == m_itemInfo.end())
+    {
         return nullptr;
     }
 
-    return &lootListSearch->second;
+    return &it->second;
 }
 
 bool ItemSchema::ItemDescForLootListItem(Random &random,

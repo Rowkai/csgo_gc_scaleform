@@ -117,6 +117,9 @@ public:
     // for case opening
     const LootList *GetCrateLootList(ItemDefIndex crateDefIndex) const;
 
+    // returns nullptr if not found
+    const ItemInfo *ItemInfoByDefIndex(ItemDefIndex defIndex) const;
+
     // for case opening FIXME: do we want to keep this here???
     bool ItemDescForLootListItem(Random &random,
         const LootListItem &lootListItem,

@@ -67,6 +67,12 @@ public:
     InventoryChangeMessages SetItemPositions(const CMsgSetItemPositions &message, std::vector<CMsgItemAcknowledged> &acknowledgements);
     InventoryChangeMessages PurchaseItems(const std::vector<uint32_t> &defIndexes, std::vector<uint64_t> &itemIds);
 
+    // returns false if the item does not exist
+    bool GetItemPreviewData(uint64_t itemId, CEconItemPreviewDataBlock &block);
+
+    // returns nullptr if not found
+    const ItemInfo *ItemInfoByDefIndex(ItemDefIndex defIndex) const;
+
     // called by InventoryModify when it goes out of scope
     void FlushChanges(const InventoryModify &modify);
 

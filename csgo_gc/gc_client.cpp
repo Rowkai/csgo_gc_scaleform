@@ -53,6 +53,26 @@ void ClientGC::HandleEvent(GCEvent type, uint64_t id, const std::vector<uint8_t>
     }
 }
 
+// dump the start of an unhandled message, useful for figuring out what older builds send
+static void PrintPayload(const void *data, uint32_t size)
+{
+    constexpr uint32_t MaxBytes = 64;
+    const uint8_t *bytes = static_cast<const uint8_t *>(data);
+    uint32_t count = (size < MaxBytes) ? size : MaxBytes;
+
+    std::string hex;
+    hex.reserve(count * 3);
+
+    for (uint32_t i = 0; i < count; i++)
+    {
+        char byte[4];
+        snprintf(byte, sizeof(byte), "%02X ", bytes[i]);
+        hex += byte;
+    }
+
+    Platform::Print("  size {}, payload: {}\n", size, hex);
+}
+
 void ClientGC::HandleMessage(uint32_t type, const void *data, uint32_t size)
 {
     GCMessageRead messageRead{ type, data, size };
@@ -118,9 +138,17 @@ void ClientGC::HandleMessage(uint32_t type, const void *data, uint32_t size)
             ProcessCasketItemExtract(messageRead);
             break;
 
+        case k_EMsgGCCStrike15_v2_Client2GCEconPreviewDataBlockRequest:
+            EconPreviewDataBlockRequest(messageRead);
+            break;
+
+        case 9129: // k_EMsgGCCStrike15_v2_SetMyMedalsInfo, sent by older builds, nothing to do
+            break;
+
         default:
             Platform::Print("ClientGC::HandleMessage: unhandled protobuf message {}\n",
                 MessageName(messageRead.TypeUnmasked()));
+            PrintPayload(data, size);
             break;
         }
     }
@@ -151,6 +179,7 @@ void ClientGC::HandleMessage(uint32_t type, const void *data, uint32_t size)
         default:
             Platform::Print("ClientGC::HandleMessage: unhandled struct message {}\n",
                 MessageName(messageRead.TypeUnmasked()));
+            PrintPayload(data, size);
             break;
         }
     }
@@ -274,12 +303,14 @@ void ClientGC::BuildMatchmakingHello(CMsgGCCStrike15_v2_MatchmakingGC2ClientHell
     message.mutable_global_stats()->set_main_post_url("");
 
     // bullshit
-    message.mutable_global_stats()->set_required_appid_version(13857);
+    // required appid versions are left at 0, older (scaleform era) builds
+    // would otherwise think they're out of date
+    message.mutable_global_stats()->set_required_appid_version(0);
     message.mutable_global_stats()->set_pricesheet_version(1680057676); // mikkotodo revisit
     message.mutable_global_stats()->set_twitch_streams_version(2);
     message.mutable_global_stats()->set_active_tournament_eventid(20);
     message.mutable_global_stats()->set_active_survey_id(0);
-    message.mutable_global_stats()->set_required_appid_version2(13862); // csgo s2
+    message.mutable_global_stats()->set_required_appid_version2(0);
 
     message.set_vac_banned(GetConfig().VacBanned());
     message.mutable_commendation()->set_cmd_friendly(GetConfig().CommendedFriendly());
@@ -500,6 +531,91 @@ void ClientGC::ApplySticker(GCMessageRead &messageRead)
     SendInventoryChangeMessages(messages);
 }
 
+// store banner items that only link to the market can't be bought, so give each
+// of them a store entry (priced like the name tag) and point the banner at the store
+void ClientGC::AddStoreBannerEntries(KeyValue &priceSheet)
+{
+    KeyValue *store = priceSheet.GetSubkeyMutable("store");
+    if (!store)
+    {
+        return;
+    }
+
+    KeyValue *entries = store->GetSubkeyMutable("entries");
+    KeyValue *banner = store->GetSubkeyMutable("store_banner_layout");
+    if (!entries || !banner)
+    {
+        return;
+    }
+
+    // copy these out, adding entries below may reallocate the subkeys
+    std::vector<std::pair<std::string, std::string>> templatePrices;
+
+    const KeyValue *nameTag = entries->GetSubkey("Name Tag");
+    const KeyValue *prices = nameTag ? nameTag->GetSubkey("prices") : nullptr;
+    if (!prices)
+    {
+        for (const KeyValue &entry : *entries)
+        {
+            prices = entry.GetSubkey("prices");
+            if (prices)
+            {
+                break;
+            }
+        }
+    }
+
+    if (prices)
+    {
+        for (const KeyValue &price : *prices)
+        {
+            templatePrices.emplace_back(price.Name(), price.String());
+        }
+    }
+    else
+    {
+        templatePrices.emplace_back("USD", "1");
+    }
+
+    std::vector<std::string> bannerItems;
+    for (const KeyValue &bannerItem : *banner)
+    {
+        if (bannerItem.GetString("market_link").size())
+        {
+            bannerItems.emplace_back(bannerItem.Name());
+        }
+    }
+
+    for (const std::string &bannerItemName : bannerItems)
+    {
+        ItemDefIndex defIndex = ToEnum<ItemDefIndex>(FromString<uint32_t>(bannerItemName));
+        const ItemInfo *itemInfo = m_inventory.ItemInfoByDefIndex(defIndex);
+        if (!itemInfo || itemInfo->m_name.empty())
+        {
+            continue;
+        }
+
+        if (!entries->GetSubkey(itemInfo->m_name))
+        {
+            KeyValue &entry = entries->AddSubkey(itemInfo->m_name);
+            entry.AddString("item_link", itemInfo->m_name);
+            entry.AddString("category_tags", "Misc");
+
+            KeyValue &entryPrices = entry.AddSubkey("prices");
+            for (const auto &[currency, amount] : templatePrices)
+            {
+                entryPrices.AddString(currency, amount);
+            }
+        }
+
+        KeyValue *bannerItem = banner->GetSubkeyMutable(bannerItemName);
+        if (bannerItem)
+        {
+            bannerItem->SetString("market_link", "0");
+        }
+    }
+}
+
 void ClientGC::StoreGetUserData(GCMessageRead &messageRead)
 {
     CMsgStoreGetUserData message;
@@ -510,10 +626,13 @@ void ClientGC::StoreGetUserData(GCMessageRead &messageRead)
     }
 
     KeyValue priceSheet{ "price_sheet" };
-    if (!priceSheet.ParseFromFile("csgo_gc/price_sheet.txt"))
+    if (!priceSheet.ParseFromFile("csgo_gc/price_sheet.txt")
+        && !priceSheet.ParseFromFile("examples/price_sheet.txt"))
     {
         return;
     }
+
+    AddStoreBannerEntries(priceSheet);
 
     std::string binaryString;
     binaryString.reserve(1 << 17);
@@ -608,6 +727,15 @@ void ClientGC::DeleteItem(GCMessageRead &messageRead)
 
 void ClientGC::UnlockCrate(GCMessageRead &messageRead)
 {
+    // some older builds send this with the extended GCMsgHdrEx_t header, in which
+    // case the job ids come before the body and the response has to target the job
+    uint64_t requestJobId = JobIdInvalid;
+    if (messageRead.RemainingSize() >= sizeof(uint64_t) * 4)
+    {
+        messageRead.ReadUint64(); // m_JobIDTarget
+        requestJobId = messageRead.ReadUint64(); // m_JobIDSource
+    }
+
     uint64_t keyId = messageRead.ReadUint64();
     uint64_t crateId = messageRead.ReadUint64();
     if (!messageRead.IsValid())
@@ -619,7 +747,40 @@ void ClientGC::UnlockCrate(GCMessageRead &messageRead)
     Platform::Print("CASE OPENING {} with {}\n", crateId, keyId);
 
     InventoryChangeMessages messages = m_inventory.UnlockCrate(crateId, keyId);
+    if (!messages.notification.has_request())
+    {
+        // failed, nothing to send
+        return;
+    }
+
+    // older builds wait for this before showing the unboxed item
+    // body is MsgGCStandardResponse_t: response index and k_EGCMsgResponseOK
+    GCMessageWrite response{ k_EMsgGCUnlockCrateResponse, requestJobId };
+    response.WriteUint16(0);
+    response.WriteUint32(0);
+    PostToHost(HostEvent::Message, response.TypeMasked(), response.Data(), response.Size());
+
     SendInventoryChangeMessages(messages);
+}
+
+void ClientGC::EconPreviewDataBlockRequest(GCMessageRead &messageRead)
+{
+    CMsgGCCStrike15_v2_Client2GCEconPreviewDataBlockRequest request;
+    if (!messageRead.ReadProtobuf(request))
+    {
+        Platform::Print("Parsing CMsgGCCStrike15_v2_Client2GCEconPreviewDataBlockRequest failed, ignoring\n");
+        return;
+    }
+
+    // param_a is the item id
+    CMsgGCCStrike15_v2_Client2GCEconPreviewDataBlockResponse response;
+    if (!m_inventory.GetItemPreviewData(request.param_a(), *response.mutable_iteminfo()))
+    {
+        Platform::Print("EconPreviewDataBlockRequest: no such item {}\n", request.param_a());
+        return;
+    }
+
+    SendMessageToGame(false, k_EMsgGCCStrike15_v2_Client2GCEconPreviewDataBlockResponse, response);
 }
 
 void ClientGC::NameItem(GCMessageRead &messageRead)
