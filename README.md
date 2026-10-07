@@ -15,14 +15,12 @@
 >```
 > Still major issues and I'm sure the code is 99% garbage. More of a POC that it works.
 >
-## **Scaleform Issues**
-- Cases don't open correctly, UI bugs out half way through.
-- Random delay on Scaleform/Panorama when opening cases.
+## **Scaleform Status**
+- Cases open correctly and the UI now works on the Scaleform/Panorama build.
+- No delay when opening cases on Scaleform. Still a second or two delay when opening cases on Panorama but I feel like this was the game, not this implementation.
 
-- <img width="1413" height="1217" alt="image" src="https://github.com/user-attachments/assets/688cbeae-fd56-4e1a-8108-6f10f3432ad0" />
+<img width="1413" height="1217" alt="image" src="https://github.com/user-attachments/assets/688cbeae-fd56-4e1a-8108-6f10f3432ad0" />
 
-> [!CAUTION]
-> This project is incomplete and not ready for general use.
 
 ## What is this?
 In Valve games, the Game Coordinator (GC) is a backend service most notably responsible for matchmaking and inventory management (like loadouts and skins). This project redirects the GC traffic to a custom, in-process implementation.
